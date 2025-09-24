@@ -1,0 +1,27 @@
+plugins {
+    id 'application'
+    id 'java'
+}
+
+group = 'dev.local'
+version = '0.1.0'
+
+repositories {
+    mavenCentral()
+    maven { url 'https://repo.jenkins-ci.org/releases/' }
+}
+
+dependencies {
+    // Core library to compile Job DSL scripts into XML
+    implementation 'org.jenkins-ci.plugins:job-dsl-core:1.87'
+
+    testImplementation 'org.junit.jupiter:junit-jupiter:5.10.1'
+}
+
+// Rely on JAVA_HOME for JDK selection
+
+application {
+    mainClass = 'dev.local.jobdsl.compiler.Main'
+}
+
+tasks.withType(Test) { useJUnitPlatform() }

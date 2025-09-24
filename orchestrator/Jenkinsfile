@@ -1,0 +1,75 @@
+// Orchestrator Pipeline: runs selected jobs sequentially or in parallel.
+// Parameters provided by Job DSL job definition.
+
+@Library('') _ // no shared libs; standard pipeline only
+
+pipeline {
+  agent any
+  options { timestamps() }
+  stages {
+    stage('Checkout') {
+      steps {
+        // Ensure we have the repo so we can load registry.groovy
+        checkout scm
+      }
+    }
+    stage('Resolve Selection') {
+      steps {
+        script {
+          def reg = load 'orchestrator/registry.groovy'
+          // parse params.JOBS as comma-separated tokens; allow IDs or full job names
+          def tokens = (params.JOBS ?: '').split(',')*.trim().findAll { it }
+          if (!tokens) {
+            // default: all registry entries
+            tokens = reg.keySet() as List
+          }
+          // map tokens to actual job names
+          def resolved = [] as LinkedHashSet
+          tokens.each { t ->
+            if (reg.containsKey(t)) {
+              resolved << (reg[t].name as String)
+            } else {
+              // assume token is a full job name
+              resolved << t
+            }
+          }
+          if (!resolved) error('No jobs resolved from selection')
+          currentBuild.displayName = "${env.BUILD_NUMBER} · ${params.MODE} · ${resolved.size()} jobs"
+          env.ORCH_JOBS_JSON = groovy.json.JsonOutput.toJson(resolved as List)
+        }
+      }
+    }
+    stage('Run') {
+      steps {
+        script {
+          def targets = new groovy.json.JsonSlurperClassic().parseText(env.ORCH_JOBS_JSON) as List
+          echo "Targets: ${targets}"
+          if (params.DRY_RUN) {
+            echo 'DRY_RUN=true; skipping execution'
+            return
+          }
+          if (params.MODE == 'parallel') {
+            def branches = [:]
+            targets.each { name ->
+              // capture for closure
+              def jobName = name
+              branches[jobName] = {
+                stage("${jobName}") {
+                  build job: jobName, wait: true, propagate: params.PROPAGATE
+                }
+              }
+            }
+            parallel branches
+          } else {
+            targets.each { jobName ->
+              stage("${jobName}") {
+                build job: jobName, wait: true, propagate: params.PROPAGATE
+              }
+            }
+          }
+        }
+      }
+    }
+  }
+}
+
